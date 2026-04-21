@@ -115,10 +115,6 @@
         window.selectStudent = (id) => { state.selectedStudent = state.attendances.find(s => s.id === id); render(); };
 
         function renderDashboard() {
-            // 早退（leave_early）もメインのボードに表示させる
-            const boardData = state.attendances.filter(s => ['normal', 'official', 'vacation', 'leave_early'].includes(s.type || 'normal'));
-            const sharedData = state.attendances.filter(s => ['infection', 'long', 'special'].includes(s.type));
-
             // 色の意味を示す凡例（Legend）を追加
             let html = `
             <div class="bg-white p-2 rounded-xl shadow-sm border border-slate-200 mb-3 flex flex-wrap gap-3 text-[10px] font-bold justify-center items-center">
@@ -136,8 +132,10 @@
                         <span class="bg-slate-700 text-white w-4 h-4 flex items-center justify-center rounded text-[8px]">${g}</span>
                         学年
                     </h2>`;
+                
+                // 通常ボード表示（不在、公欠、ラーケ、早退）
                 [1, 2, 3, 4, 5].forEach(c => {
-                    const students = boardData.filter(s => s.grade == g && s.class == c);
+                    const students = state.attendances.filter(s => s.grade == g && s.class == c && ['normal', 'official', 'vacation', 'leave_early'].includes(s.type || 'normal'));
                     html += `<div class="bg-white rounded-xl shadow-sm border border-slate-200 p-2 min-h-[80px]">
                         <div class="flex justify-between items-center mb-1">
                             <span class="text-[9px] font-black text-slate-300">${c}組</span>
@@ -152,28 +150,31 @@
                         </div>
                     </div>`;
                 });
+
+                // ★ここが追加部分：各学年の下部に別室や感染症の共有情報を表示する
+                const gradeSharedData = state.attendances.filter(s => s.grade == g && ['infection', 'long', 'special'].includes(s.type));
+                if (gradeSharedData.length > 0) {
+                    html += `
+                    <div class="mt-4 pt-2 border-t-2 border-indigo-100">
+                        <h3 class="text-[9px] font-black text-indigo-400 mb-1.5 flex items-center gap-1 uppercase tracking-widest"><i data-lucide="info" size="10"></i> ${g}学年 別室・共有情報</h3>
+                        <div class="space-y-1.5">
+                            ${gradeSharedData.map(s => `
+                                <div onclick="window.selectStudent('${s.id}')" class="bg-white border-l-4 border-indigo-500 rounded p-1.5 shadow-sm cursor-pointer flex justify-between items-center">
+                                    <div>
+                                        <div class="text-[10px] font-black">${s.studentId} <span class="text-[8px] text-slate-400 font-normal ml-1">(${s.class}組)</span></div>
+                                        <div class="text-[8px] text-slate-500">${s.detail || (s.type === 'infection' ? '感染症' : (s.type === 'long' ? '長欠' : '別室'))}</div>
+                                        ${s.period ? `<div class="text-[8px] text-indigo-400 font-bold">${s.period}</div>` : ''}
+                                    </div>
+                                    <i data-lucide="chevron-right" size="12" class="text-slate-300"></i>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>`;
+                }
+
                 html += `</div>`;
             });
             html += '</div>';
-
-            if (sharedData.length > 0) {
-                html += `
-                <div class="mt-6 border-t pt-4">
-                    <h3 class="text-[10px] font-black text-indigo-400 mb-2 flex items-center gap-1 uppercase tracking-widest"><i data-lucide="info" size="12"></i> 学年共有情報</h3>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        ${sharedData.map(s => `
-                            <div onclick="window.selectStudent('${s.id}')" class="bg-white border-l-4 border-indigo-500 rounded p-2 shadow-sm cursor-pointer flex justify-between items-center">
-                                <div>
-                                    <div class="text-[10px] font-black">${s.studentId}</div>
-                                    <div class="text-[8px] text-slate-400">${s.detail || (s.type === 'infection' ? '感染症' : '共有事項')}</div>
-                                    ${s.period ? `<div class="text-[8px] text-indigo-400 font-bold">${s.period}</div>` : ''}
-                                </div>
-                                <i data-lucide="chevron-right" size="12" class="text-slate-300"></i>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>`;
-            }
 
             return html;
         }
