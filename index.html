@@ -3,29 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>学校出欠管理システム</title>
+    <title>不在生徒見える化システム</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap');
-        body { font-family: 'Noto Sans JP', sans-serif; }
-        /* 各生徒の表示ユニット */
-        .student-unit { width: 45px; height: 65px; display: flex; flex-direction: column; align-items: center; position: relative; }
-        .absent-num { font-size: 1.5rem; font-weight: 700; color: #0f172a; height: 45px; display: flex; align-items: center; justify-content: center; font-family: monospace; }
-        .late-square { border: 3px solid #ef4444; border-radius: 8px; width: 45px; height: 45px; display: flex; align-items: center; justify-content: center; background-color: #fef2f2; color: #ef4444; font-weight: 900; font-family: monospace; font-size: 1.25rem; }
-        .late-time { position: absolute; bottom: 0px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #ef4444; font-weight: 900; white-space: nowrap; }
+        body { font-family: 'Noto Sans JP', sans-serif; overflow-x: hidden; }
+        
+        /* 生徒ユニットの基本スタイル */
+        .student-unit { width: 38px; height: 50px; display: flex; flex-direction: column; align-items: center; position: relative; }
+        .num-base { font-size: 1.2rem; font-weight: 700; height: 38px; display: flex; align-items: center; justify-content: center; font-family: monospace; }
+        
+        /* 種別ごとのスタイル */
+        .type-normal { color: #0f172a; }
+        .type-official { color: #16a34a; font-weight: 900; } /* 公欠: 緑 */
+        .type-vacation { color: #f97316; font-weight: 900; } /* ラーケ: オレンジ */
+        
+        /* 遅刻の赤い四角 */
+        .late-square { border: 2.5px solid #ef4444; border-radius: 6px; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; background-color: #fef2f2; color: #ef4444; font-weight: 900; font-family: monospace; font-size: 1.1rem; }
+        .late-time { position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #ef4444; font-weight: 900; white-space: nowrap; }
+
+        /* 早退の青緑の四角 */
+        .leave-square { border: 2.5px solid #0d9488; border-radius: 6px; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; background-color: #f0fdfa; color: #0d9488; font-weight: 900; font-family: monospace; font-size: 1.1rem; }
+        .leave-time { position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #0d9488; font-weight: 900; white-space: nowrap; }
     </style>
 </head>
-<body class="bg-slate-100 pb-24">
+<body class="bg-slate-100 pb-20">
     <div id="app">
-        <!-- 読み込み中表示 -->
-        <div class="flex items-center justify-center h-screen">
-            <div class="text-center">
-                <div id="status-spinner" class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-                <p id="status-text" class="text-slate-500 font-bold">システムを起動中...</p>
-                <div id="error-display" class="hidden mt-4 p-4 bg-red-100 text-red-700 rounded-xl text-sm max-w-xs mx-auto"></div>
-            </div>
-        </div>
+        <div class="flex items-center justify-center h-screen text-slate-400 font-bold">起動中...</div>
     </div>
 
     <script type="module">
@@ -33,9 +38,6 @@
         import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
-        // ==========================================================
-        // Firebase設定（提供された値を反映済み）
-        // ==========================================================
         const firebaseConfig = {
             apiKey: "AIzaSyAGE1uP5-kwygyMxTli-9X9730a6vjFY_8",
             authDomain: "school-attendance-9a7b0.firebaseapp.com",
@@ -44,25 +46,14 @@
             messagingSenderId: "158278661521",
             appId: "1:158278661521:web:2c0bcab31f59b35e101630"
         };
-        // ==========================================================
 
         const appId = "school-attendance-9a7b0";
         let db, auth;
-        let state = { user: null, attendances: [], view: 'dashboard', selectedStudent: null, currentTime: "" };
-
-        function showError(msg) {
-            const errEl = document.getElementById('error-display');
-            const spin = document.getElementById('status-spinner');
-            if(errEl) {
-                errEl.innerText = msg;
-                errEl.classList.remove('hidden');
-                if(spin) spin.classList.add('hidden');
-                document.getElementById('status-text').innerText = "エラーが発生しました";
-            }
-        }
+        let state = { user: null, attendances: [], view: 'dashboard', selectedStudent: null, currentTime: "", inputType: 'normal' };
 
         async function init() {
             setInterval(() => {
+                // ここで「秒（second）」を追加しました
                 state.currentTime = new Date().toLocaleTimeString('ja-JP', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
                 const el = document.getElementById('digital-clock');
                 if (el) el.innerText = state.currentTime;
@@ -76,51 +67,42 @@
                 onAuthStateChanged(auth, (user) => {
                     state.user = user;
                     if (user) {
-                        const getCol = () => collection(db, 'artifacts', appId, 'public', 'data', 'attendance');
-                        onSnapshot(getCol(), (snapshot) => {
+                        onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'attendance'), (snapshot) => {
                             state.attendances = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
                             render();
-                        }, (err) => {
-                            showError("Firestoreの権限エラーです。");
                         });
                     } else {
-                        signInAnonymously(auth).catch(e => showError("ログインエラー"));
+                        signInAnonymously(auth);
                     }
                 });
-            } catch (e) {
-                showError("初期化エラー: " + e.message);
-            }
+            } catch (e) { console.error(e); }
         }
 
         function render() {
             const root = document.getElementById('app');
             if (!state.user) return;
 
-            // 日付のフォーマットを大きく、曜日付きに設定
-            const today = new Date();
-            const dateStr = today.toLocaleDateString('ja-JP', { 
-                month: 'long', 
-                day: 'numeric', 
-                weekday: 'short' 
-            });
+            const dateStr = new Date().toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' });
 
             root.innerHTML = `
-                <header class="bg-white border-b sticky top-0 z-30 px-4 py-4 shadow-sm flex justify-between items-center">
-                    <h1 class="text-xs font-bold text-indigo-500">出欠管理システム</h1>
-                    <div id="digital-clock" class="text-4xl font-black text-indigo-600 font-mono tracking-tighter">${state.currentTime}</div>
-                    <div class="text-right text-sm font-black text-slate-500 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
+                <header class="bg-white border-b sticky top-0 z-30 px-4 py-2 shadow-sm flex justify-between items-center h-14">
+                    <div class="flex items-center gap-3">
+                        <h1 class="text-[10px] font-black text-indigo-500 leading-tight hidden md:block">不在生徒見える化<br>システム</h1>
+                        <div id="digital-clock" class="text-2xl md:text-3xl font-black text-indigo-600 font-mono tracking-tighter">${state.currentTime}</div>
+                    </div>
+                    <div class="text-sm font-black text-slate-500 bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
                         ${dateStr}
                     </div>
                 </header>
-                <main class="p-4 max-w-7xl mx-auto">
+                <main class="p-2 max-w-[1600px] mx-auto">
                     ${state.view === 'dashboard' ? renderDashboard() : renderRegister()}
                 </main>
-                <nav class="fixed bottom-0 left-0 right-0 bg-white border-t p-3 flex justify-around shadow-lg z-40 pb-safe">
+                <nav class="fixed bottom-0 left-0 right-0 bg-white border-t p-2 flex justify-around shadow-lg z-40">
                     <button onclick="window.setView('dashboard')" class="flex flex-col items-center ${state.view === 'dashboard' ? 'text-indigo-600' : 'text-slate-400'}">
-                        <i data-lucide="layout-dashboard"></i><span class="text-[10px] font-bold">表示</span>
+                        <i data-lucide="layout-dashboard" size="20"></i><span class="text-[9px] font-bold">集中画面</span>
                     </button>
                     <button onclick="window.setView('register')" class="flex flex-col items-center ${state.view === 'register' ? 'text-indigo-600' : 'text-slate-400'}">
-                        <i data-lucide="user-plus"></i><span class="text-[10px] font-bold">登録</span>
+                        <i data-lucide="user-plus" size="20"></i><span class="text-[9px] font-bold">連絡無し</span>
                     </button>
                 </nav>
                 ${state.selectedStudent ? renderModal() : ''}
@@ -129,28 +111,32 @@
         }
 
         window.setView = (v) => { state.view = v; render(); };
+        window.setInputType = (t) => { state.inputType = t; render(); };
         window.selectStudent = (id) => { state.selectedStudent = state.attendances.find(s => s.id === id); render(); };
 
         function renderDashboard() {
-            let html = '<div class="grid grid-cols-1 md:grid-cols-3 gap-6">';
+            // 早退（leave_early）もメインのボードに表示させる
+            const boardData = state.attendances.filter(s => ['normal', 'official', 'vacation', 'leave_early'].includes(s.type || 'normal'));
+            const sharedData = state.attendances.filter(s => ['infection', 'long', 'special'].includes(s.type));
+
+            let html = '<div class="grid grid-cols-3 gap-2 md:gap-4">';
             [1, 2, 3].forEach(g => {
-                html += `<div><h2 class="text-xl font-black mb-2 text-slate-700 flex items-center gap-2">
-                    <span class="bg-slate-700 text-white w-7 h-7 flex items-center justify-center rounded text-sm">${g}</span>
-                    学年
-                </h2>`;
+                html += `<div class="space-y-2">
+                    <h2 class="text-xs font-black text-slate-700 flex items-center gap-1 ml-1">
+                        <span class="bg-slate-700 text-white w-4 h-4 flex items-center justify-center rounded text-[8px]">${g}</span>
+                        学年
+                    </h2>`;
                 [1, 2, 3, 4, 5].forEach(c => {
-                    const students = state.attendances.filter(s => s.grade == g && s.class == c);
-                    // クラスボックスの縦幅を min-h-[200px] で大きく確保
-                    html += `<div class="bg-white rounded-2xl shadow-sm border border-slate-200 mb-4 p-4 min-h-[200px]">
-                        <div class="flex justify-between items-center mb-3">
-                            <span class="text-xs font-black text-slate-400">${c}組</span>
-                            <span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-mono font-bold">${students.length}名</span>
+                    const students = boardData.filter(s => s.grade == g && s.class == c);
+                    html += `<div class="bg-white rounded-xl shadow-sm border border-slate-200 p-2 min-h-[80px]">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-[9px] font-black text-slate-300">${c}組</span>
                         </div>
-                        <div class="flex flex-wrap gap-3 content-start">
-                            ${students.length === 0 ? '<div class="w-full text-center py-10 text-[10px] text-slate-200 font-bold italic uppercase">No Data</div>' : students.map(s => `
-                                <div onclick="window.selectStudent('${s.id}')" class="student-unit cursor-pointer transition-transform active:scale-90">
-                                    <div class="${s.status === 'late' ? 'late-square' : 'absent-num'}">${s.studentNum}</div>
-                                    ${s.status === 'late' ? `<div class="late-time">${s.arrivalTime}</div>` : ''}
+                        <div class="flex flex-wrap gap-1.5">
+                            ${students.map(s => `
+                                <div onclick="window.selectStudent('${s.id}')" class="student-unit cursor-pointer">
+                                    <div class="${s.status === 'late' ? 'late-square' : (s.type === 'leave_early' ? 'leave-square' : `num-base type-${s.type || 'normal'}`)}">${s.studentNum}</div>
+                                    ${s.status === 'late' ? `<div class="late-time">${s.arrivalTime}</div>` : (s.type === 'leave_early' ? `<div class="leave-time">${s.leaveTime || ''}</div>` : '')}
                                 </div>
                             `).join('')}
                         </div>
@@ -158,79 +144,127 @@
                 });
                 html += `</div>`;
             });
-            return html + '</div>';
+            html += '</div>';
+
+            if (sharedData.length > 0) {
+                html += `
+                <div class="mt-6 border-t pt-4">
+                    <h3 class="text-[10px] font-black text-indigo-400 mb-2 flex items-center gap-1 uppercase tracking-widest"><i data-lucide="info" size="12"></i> 学年共有情報</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        ${sharedData.map(s => `
+                            <div onclick="window.selectStudent('${s.id}')" class="bg-white border-l-4 border-indigo-500 rounded p-2 shadow-sm cursor-pointer flex justify-between items-center">
+                                <div>
+                                    <div class="text-[10px] font-black">${s.studentId}</div>
+                                    <div class="text-[8px] text-slate-400">${s.detail || (s.type === 'infection' ? '感染症' : '共有事項')}</div>
+                                    ${s.period ? `<div class="text-[8px] text-indigo-400 font-bold">${s.period}</div>` : ''}
+                                </div>
+                                <i data-lucide="chevron-right" size="12" class="text-slate-300"></i>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+            }
+
+            return html;
         }
 
         function renderRegister() {
-            return `<div class="max-w-md mx-auto bg-white rounded-3xl shadow-xl p-8 space-y-6 animate-in slide-in-from-bottom-4 duration-300">
-                <h2 class="text-2xl font-black text-indigo-600">新規欠席登録</h2>
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-widest">学年・組・番号（例: 1205）</div>
-                <input id="in-code" type="number" inputmode="numeric" class="w-full bg-slate-50 border-2 rounded-2xl p-6 text-5xl font-mono text-center outline-none focus:border-indigo-500 focus:bg-white transition-all shadow-inner" placeholder="0000">
-                <button onclick="window.add()" class="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl active:scale-95 transition-transform text-lg">登録を確定する</button>
-                <div class="text-center text-[10px] text-slate-400 font-bold">登録後、表示画面で遅刻への変更が可能です</div>
+            const types = [
+                { id: 'normal', label: '通常', color: 'bg-slate-800' },
+                { id: 'official', label: '公欠', color: 'bg-green-600' },
+                { id: 'vacation', label: 'ラーケ', color: 'bg-orange-500' },
+                { id: 'leave_early', label: '早退', color: 'bg-teal-600' },
+                { id: 'infection', label: '感染症', color: 'bg-blue-600' },
+                { id: 'long', label: '長欠', color: 'bg-indigo-400' },
+                { id: 'special', label: '別室', color: 'bg-purple-600' }
+            ];
+
+            return `<div class="max-w-md mx-auto bg-white rounded-3xl shadow-xl p-6 mt-2 space-y-4">
+                <h2 class="text-xl font-black text-indigo-600 text-center uppercase tracking-tighter">連絡無し生徒</h2>
+                <div>
+                    <input id="in-code" type="number" inputmode="numeric" class="w-full bg-slate-50 border-2 rounded-2xl p-4 text-4xl font-mono text-center outline-none focus:border-indigo-500" placeholder="0000">
+                    <div class="flex justify-between px-2 mt-1 text-[8px] font-bold text-slate-300 uppercase tracking-widest"><span>学年</span><span>組</span><span>番号</span></div>
+                </div>
+                <div class="grid grid-cols-4 gap-2">
+                    ${types.map(t => `
+                        <button onclick="window.setInputType('${t.id}')" class="py-2 rounded-xl text-[10px] font-black transition-all border-2 ${state.inputType === t.id ? `${t.color} text-white border-transparent` : 'bg-white border-slate-100 text-slate-400'}">
+                            ${t.label}
+                        </button>
+                    `).join('')}
+                </div>
+                ${['infection', 'long', 'special'].includes(state.inputType) ? `
+                    <div class="space-y-2">
+                        <input id="in-detail" type="text" class="w-full border-2 rounded-xl p-3 text-xs outline-none" placeholder="詳細・理由を入力">
+                        <input id="in-period" type="text" class="w-full border-2 rounded-xl p-3 text-xs outline-none" placeholder="期間を入力（例: 4/25まで）">
+                    </div>
+                ` : ''}
+                ${state.inputType === 'leave_early' ? `
+                    <div class="bg-teal-50 p-3 rounded-xl border border-teal-100">
+                        <label class="block text-center text-[8px] font-black text-teal-600 uppercase mb-1">早退した時間を入力</label>
+                        <input id="in-leave-time" type="time" class="w-full border-2 border-teal-100 rounded-lg p-2 text-xl text-center outline-none focus:border-teal-500">
+                    </div>
+                ` : ''}
+                <button onclick="window.add()" class="w-full bg-indigo-600 text-white font-black py-4 rounded-xl shadow-lg active:scale-95 transition-transform">登録を確定する</button>
             </div>`;
         }
 
         window.add = async () => {
             const code = document.getElementById('in-code').value;
+            const detail = document.getElementById('in-detail')?.value || "";
+            const period = document.getElementById('in-period')?.value || "";
+            const leaveTime = document.getElementById('in-leave-time')?.value || "";
+
             if (code.length !== 4) return alert("4ケタで入力してください");
-            try {
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'attendance'), { 
-                    studentId: code, 
-                    grade: parseInt(code[0]), 
-                    class: parseInt(code[1]), 
-                    studentNum: code.substring(2), 
-                    type: 'absent', 
-                    status: 'absent', 
-                    timestamp: Date.now() 
-                });
-                state.view = 'dashboard'; render();
-            } catch (e) {
-                alert("登録エラー");
-            }
+            if (state.inputType === 'leave_early' && !leaveTime) return alert("早退時間を入力してください");
+
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'attendance'), { 
+                studentId: code, 
+                grade: parseInt(code[0]), 
+                class: parseInt(code[1]), 
+                studentNum: code.substring(2), 
+                type: state.inputType,
+                status: state.inputType === 'leave_early' ? 'leave_early' : 'absent', 
+                detail: detail,
+                period: period,
+                leaveTime: leaveTime,
+                timestamp: Date.now() 
+            });
+            state.view = 'dashboard'; state.inputType = 'normal'; render();
         };
 
         window.markLate = async () => {
             const time = document.getElementById('late-time').value;
-            if (!time) return alert("時間を入力してください");
-            try {
-                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendance', state.selectedStudent.id), { 
-                    status: 'late', 
-                    arrivalTime: time 
-                });
-                state.selectedStudent = null; render();
-            } catch (e) {
-                alert("更新エラー");
-            }
+            if (!time) return alert("時間入力");
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendance', state.selectedStudent.id), { status: 'late', arrivalTime: time });
+            state.selectedStudent = null; render();
         };
 
         window.remove = async () => {
-            if (!confirm("このデータを削除しますか？")) return;
-            try {
+            if (confirm("削除しますか?")) {
                 await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendance', state.selectedStudent.id));
                 state.selectedStudent = null; render();
-            } catch (e) {
-                alert("削除エラー");
             }
         };
 
         function renderModal() {
             const s = state.selectedStudent;
-            return `<div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-                <div class="bg-white rounded-3xl w-full max-w-sm p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-200">
-                    <div class="text-center">
-                        <div class="text-xs font-black text-slate-300 uppercase tracking-widest mb-1">対象生徒</div>
-                        <div class="text-5xl font-black text-slate-800 font-mono">${s.studentId}</div>
-                        <div class="text-xs font-bold text-slate-400 mt-2 bg-slate-100 inline-block px-3 py-1 rounded-full">${s.grade}年${s.class}組 ${s.studentNum}番</div>
+            return `<div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-3xl w-full max-w-xs p-6 space-y-4 shadow-2xl">
+                    <div class="text-center font-black text-4xl font-mono">${s.studentId}</div>
+                    <div class="text-center text-[10px] font-bold text-slate-400">
+                        ${s.type === 'leave_early' ? `<span class="text-teal-600">早退時間: ${s.leaveTime}</span>` : s.detail || '理由未登録'} 
+                        ${s.period ? `<br><span class="text-indigo-400">期間: ${s.period}</span>` : ''}
                     </div>
-                    <div class="bg-red-50 p-4 rounded-2xl space-y-2 border border-red-100">
-                        <label class="block text-center text-[10px] font-black text-red-400 uppercase tracking-tighter">遅刻登校時間を入力</label>
-                        <input id="late-time" type="time" class="w-full border-2 border-red-100 rounded-xl p-4 text-3xl text-center outline-none focus:border-red-500 font-mono shadow-inner" value="${s.arrivalTime || ''}">
-                        <button onclick="window.markLate()" class="w-full bg-red-600 text-white font-black py-4 rounded-xl shadow-lg active:scale-95 transition-transform">遅刻確定（赤枠表示）</button>
+                    ${s.type !== 'leave_early' ? `
+                    <div class="bg-red-50 p-3 rounded-xl space-y-2 border border-red-100">
+                        <label class="block text-center text-[8px] font-black text-red-400 uppercase">遅刻時間を入力</label>
+                        <input id="late-time" type="time" class="w-full border-2 rounded-lg p-2 text-2xl text-center outline-none" value="${s.arrivalTime || ''}">
+                        <button onclick="window.markLate()" class="w-full bg-red-600 text-white font-black py-3 rounded-lg text-xs">遅刻として確定</button>
                     </div>
-                    <div class="flex gap-2 pt-2">
-                        <button onclick="state.selectedStudent=null;render()" class="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-slate-600 active:bg-slate-200">閉じる</button>
-                        <button onclick="window.remove()" class="px-4 py-3 text-red-300 font-bold hover:text-red-500 transition-colors">削除</button>
+                    ` : ''}
+                    <div class="flex gap-2">
+                        <button onclick="state.selectedStudent=null;render()" class="flex-1 py-2 bg-slate-100 rounded-lg text-xs font-bold text-slate-400">閉じる</button>
+                        <button onclick="window.remove()" class="px-3 py-2 text-red-300 text-[10px] font-bold">削除</button>
                     </div>
                 </div>
             </div>`;
