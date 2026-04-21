@@ -49,7 +49,6 @@
         
         let lastDateStr = new Date().toDateString();
 
-        // 日本時間のYYYY-MM-DD文字列を取得する関数
         const getTodayString = () => {
             const now = new Date();
             const year = now.getFullYear();
@@ -91,7 +90,6 @@
             } catch (e) { console.error(e); }
         }
 
-        // 「表示すべき日（今日）」かどうかを判定する関数
         const isTargetDateToday = (targetDateStr) => {
             if (!targetDateStr) return false;
             return targetDateStr === getTodayString();
@@ -132,15 +130,15 @@
         window.setView = (v) => { state.view = v; render(); };
         window.setInputType = (t) => { state.inputType = t; render(); };
         window.selectStudent = (id) => { state.selectedStudent = state.attendances.find(s => s.id === id); render(); };
+        // ★修正: 閉じるボタン用の関数を明示的に追加
+        window.closeModal = () => { state.selectedStudent = null; render(); };
 
         function renderDashboard() {
-            // 上部ボード：対象日（targetDate）が「今日」のものだけを表示
             const boardData = state.attendances.filter(s => 
                 ['normal', 'official', 'vacation', 'leave_early'].includes(s.type || 'normal') && 
                 isTargetDateToday(s.targetDate)
             );
             
-            // 下部共有情報：日付関係なく表示
             const sharedData = state.attendances.filter(s => 
                 ['infection', 'long', 'special'].includes(s.type)
             );
@@ -248,7 +246,6 @@
                         <input id="in-target-date" type="date" class="w-full border-2 border-amber-100 rounded-lg p-2 text-xl text-center outline-none focus:border-amber-500" value="${todayStr}">
                     </div>
                 ` : `
-                    <!-- その他の種別は見えない形で今日の日付を持たせておく -->
                     <input id="in-target-date" type="hidden" value="${todayStr}">
                 `}
                 
@@ -268,7 +265,6 @@
             const detail = document.getElementById('in-detail')?.value || "";
             const period = document.getElementById('in-period')?.value || "";
             const leaveTime = document.getElementById('in-leave-time')?.value || "";
-            // ★追加：対象の日付を取得
             const targetDate = document.getElementById('in-target-date')?.value || getTodayString();
 
             if (code.length !== 4) return alert("4ケタで入力してください");
@@ -284,7 +280,7 @@
                 detail: detail,
                 period: period,
                 leaveTime: leaveTime,
-                targetDate: targetDate, // ★ここで「表示すべき日」を記録
+                targetDate: targetDate, 
                 timestamp: Date.now()
             });
             state.view = 'dashboard'; state.inputType = 'normal'; render();
@@ -322,7 +318,8 @@
                     </div>
                     ` : ''}
                     <div class="flex gap-2">
-                        <button onclick="state.selectedStudent=null;render()" class="flex-1 py-2 bg-slate-100 rounded-lg text-xs font-bold text-slate-400">閉じる</button>
+                        <!-- ★修正: onclickの中身をwindow.closeModal()に変更 -->
+                        <button onclick="window.closeModal()" class="flex-1 py-2 bg-slate-100 rounded-lg text-xs font-bold text-slate-400">閉じる</button>
                         <button onclick="window.remove()" class="px-3 py-2 text-red-300 text-[10px] font-bold">削除</button>
                     </div>
                 </div>
