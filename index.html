@@ -10,20 +10,16 @@
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap');
         body { font-family: 'Noto Sans JP', sans-serif; overflow-x: hidden; }
         
-        /* 生徒ユニットの基本スタイル */
         .student-unit { width: 38px; height: 50px; display: flex; flex-direction: column; align-items: center; position: relative; }
         .num-base { font-size: 1.2rem; font-weight: 700; height: 38px; display: flex; align-items: center; justify-content: center; font-family: monospace; }
         
-        /* 種別ごとのスタイル */
         .type-normal { color: #0f172a; }
-        .type-official { color: #16a34a; font-weight: 900; } /* 公欠: 緑 */
-        .type-vacation { color: #f97316; font-weight: 900; } /* ラーケ: オレンジ */
+        .type-official { color: #16a34a; font-weight: 900; } 
+        .type-vacation { color: #f97316; font-weight: 900; } 
         
-        /* 遅刻の赤い四角 */
         .late-square { border: 2.5px solid #ef4444; border-radius: 6px; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; background-color: #fef2f2; color: #ef4444; font-weight: 900; font-family: monospace; font-size: 1.1rem; }
         .late-time { position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #ef4444; font-weight: 900; white-space: nowrap; }
 
-        /* 早退の青緑の四角 */
         .leave-square { border: 2.5px solid #0d9488; border-radius: 6px; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; background-color: #f0fdfa; color: #0d9488; font-weight: 900; font-family: monospace; font-size: 1.1rem; }
         .leave-time { position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #0d9488; font-weight: 900; white-space: nowrap; }
     </style>
@@ -50,13 +46,30 @@
         const appId = "school-attendance-9a7b0";
         let db, auth;
         let state = { user: null, attendances: [], view: 'dashboard', selectedStudent: null, currentTime: "", inputType: 'normal' };
+        
+        let lastDateStr = new Date().toDateString();
+
+        // 日本時間のYYYY-MM-DD文字列を取得する関数
+        const getTodayString = () => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
 
         async function init() {
             setInterval(() => {
-                // ここで「秒（second）」を追加しました
-                state.currentTime = new Date().toLocaleTimeString('ja-JP', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                const now = new Date();
+                state.currentTime = now.toLocaleTimeString('ja-JP', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
                 const el = document.getElementById('digital-clock');
                 if (el) el.innerText = state.currentTime;
+
+                const currentDateStr = now.toDateString();
+                if (lastDateStr !== currentDateStr) {
+                    lastDateStr = currentDateStr;
+                    if(state.view === 'dashboard') render();
+                }
             }, 1000);
 
             try {
@@ -77,6 +90,12 @@
                 });
             } catch (e) { console.error(e); }
         }
+
+        // 「表示すべき日（今日）」かどうかを判定する関数
+        const isTargetDateToday = (targetDateStr) => {
+            if (!targetDateStr) return false;
+            return targetDateStr === getTodayString();
+        };
 
         function render() {
             const root = document.getElementById('app');
@@ -115,7 +134,17 @@
         window.selectStudent = (id) => { state.selectedStudent = state.attendances.find(s => s.id === id); render(); };
 
         function renderDashboard() {
-            // 色の意味を示す凡例（Legend）を追加
+            // 上部ボード：対象日（targetDate）が「今日」のものだけを表示
+            const boardData = state.attendances.filter(s => 
+                ['normal', 'official', 'vacation', 'leave_early'].includes(s.type || 'normal') && 
+                isTargetDateToday(s.targetDate)
+            );
+            
+            // 下部共有情報：日付関係なく表示
+            const sharedData = state.attendances.filter(s => 
+                ['infection', 'long', 'special'].includes(s.type)
+            );
+
             let html = `
             <div class="bg-white p-2 rounded-xl shadow-sm border border-slate-200 mb-3 flex flex-wrap gap-3 text-[10px] font-bold justify-center items-center">
                 <span class="flex items-center gap-1 text-slate-800"><span class="w-2.5 h-2.5 bg-slate-800 rounded-full"></span> 不在</span>
@@ -133,9 +162,8 @@
                         学年
                     </h2>`;
                 
-                // 通常ボード表示（不在、公欠、ラーケ、早退）
                 [1, 2, 3, 4, 5].forEach(c => {
-                    const students = state.attendances.filter(s => s.grade == g && s.class == c && ['normal', 'official', 'vacation', 'leave_early'].includes(s.type || 'normal'));
+                    const students = boardData.filter(s => s.grade == g && s.class == c);
                     html += `<div class="bg-white rounded-xl shadow-sm border border-slate-200 p-2 min-h-[80px]">
                         <div class="flex justify-between items-center mb-1">
                             <span class="text-[9px] font-black text-slate-300">${c}組</span>
@@ -151,8 +179,7 @@
                     </div>`;
                 });
 
-                // ★ここが追加部分：各学年の下部に別室や感染症の共有情報を表示する
-                const gradeSharedData = state.attendances.filter(s => s.grade == g && ['infection', 'long', 'special'].includes(s.type));
+                const gradeSharedData = sharedData.filter(s => s.grade == g);
                 if (gradeSharedData.length > 0) {
                     html += `
                     <div class="mt-4 pt-2 border-t-2 border-indigo-100">
@@ -189,6 +216,8 @@
                 { id: 'long', label: '長欠', color: 'bg-indigo-400' },
                 { id: 'special', label: '別室', color: 'bg-purple-600' }
             ];
+            
+            const todayStr = getTodayString();
 
             return `<div class="max-w-md mx-auto bg-white rounded-3xl shadow-xl p-6 mt-2 space-y-4">
                 <h2 class="text-xl font-black text-indigo-600 text-center uppercase tracking-tighter">連絡無し生徒</h2>
@@ -212,12 +241,24 @@
                         <input id="in-period" type="text" class="w-full border-2 rounded-xl p-3 text-xs outline-none" placeholder="期間を入力（例: 4/25まで）">
                     </div>
                 ` : ''}
+
+                ${['official', 'vacation'].includes(state.inputType) ? `
+                    <div class="bg-amber-50 p-3 rounded-xl border border-amber-100">
+                        <label class="block text-center text-[8px] font-black text-amber-600 uppercase mb-1">対象の日付を指定（事前予約）</label>
+                        <input id="in-target-date" type="date" class="w-full border-2 border-amber-100 rounded-lg p-2 text-xl text-center outline-none focus:border-amber-500" value="${todayStr}">
+                    </div>
+                ` : `
+                    <!-- その他の種別は見えない形で今日の日付を持たせておく -->
+                    <input id="in-target-date" type="hidden" value="${todayStr}">
+                `}
+                
                 ${state.inputType === 'leave_early' ? `
                     <div class="bg-teal-50 p-3 rounded-xl border border-teal-100">
                         <label class="block text-center text-[8px] font-black text-teal-600 uppercase mb-1">早退した時間を入力</label>
                         <input id="in-leave-time" type="time" class="w-full border-2 border-teal-100 rounded-lg p-2 text-xl text-center outline-none focus:border-teal-500">
                     </div>
                 ` : ''}
+
                 <button onclick="window.add()" class="w-full bg-indigo-600 text-white font-black py-4 rounded-xl shadow-lg active:scale-95 transition-transform">登録を確定する</button>
             </div>`;
         }
@@ -227,6 +268,8 @@
             const detail = document.getElementById('in-detail')?.value || "";
             const period = document.getElementById('in-period')?.value || "";
             const leaveTime = document.getElementById('in-leave-time')?.value || "";
+            // ★追加：対象の日付を取得
+            const targetDate = document.getElementById('in-target-date')?.value || getTodayString();
 
             if (code.length !== 4) return alert("4ケタで入力してください");
             if (state.inputType === 'leave_early' && !leaveTime) return alert("早退時間を入力してください");
@@ -241,7 +284,8 @@
                 detail: detail,
                 period: period,
                 leaveTime: leaveTime,
-                timestamp: Date.now() 
+                targetDate: targetDate, // ★ここで「表示すべき日」を記録
+                timestamp: Date.now()
             });
             state.view = 'dashboard'; state.inputType = 'normal'; render();
         };
@@ -268,8 +312,9 @@
                     <div class="text-center text-[10px] font-bold text-slate-400">
                         ${s.type === 'leave_early' ? `<span class="text-teal-600">早退時間: ${s.leaveTime}</span>` : s.detail || '理由未登録'} 
                         ${s.period ? `<br><span class="text-indigo-400">期間: ${s.period}</span>` : ''}
+                        ${['official', 'vacation'].includes(s.type) ? `<br><span class="text-amber-500">対象日: ${s.targetDate}</span>` : ''}
                     </div>
-                    ${s.type !== 'leave_early' ? `
+                    ${s.type !== 'leave_early' && !['infection', 'long', 'special'].includes(s.type) ? `
                     <div class="bg-red-50 p-3 rounded-xl space-y-2 border border-red-100">
                         <label class="block text-center text-[8px] font-black text-red-400 uppercase">遅刻時間を入力</label>
                         <input id="late-time" type="time" class="w-full border-2 rounded-lg p-2 text-2xl text-center outline-none" value="${s.arrivalTime || ''}">
